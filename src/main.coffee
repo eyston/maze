@@ -30,7 +30,9 @@ rg = (->
     _diff = (a, b) -> b - a
 
     _adjacent_cells = (cells, cell) ->
-        possible_cells = m.set m.map (m.partial m.map, m.sum, cell), adjacent_offsets
+        possible_cells = m.set m.map ((offset) ->
+            m.into m.vector(), (m.map m.sum, cell, offset)
+        ), adjacent_offsets
         m.intersection possible_cells, cells
 
     _add_borders = (borders, cells, direction) ->
@@ -221,7 +223,10 @@ GridBorder = React.createClass
         !(m.equals np.borders, @props.borders)
 
     key: (wall) ->
-        m.hash wall
+        x = m.get_in wall, [0, 0]
+        y = m.get_in wall, [0, 1]
+        pos = m.get wall, 1
+        "#{x}-#{y}-#{pos}"
 
     createWall: (wall) ->
         GridWall
@@ -239,7 +244,12 @@ GridPath = React.createClass
         !(m.equals np.segments, @props.segments)
 
     key: (segment) ->
-        m.hash m.flatten segment
+        # m.hash m.flatten segment
+        x1 = m.get_in segment, [0, 0]
+        y1 = m.get_in segment, [0, 1]
+        x2 = m.get_in segment, [1, 0]
+        y2 = m.get_in segment, [1, 1]
+        "#{x1}-#{y1}-#{x2}-#{y2}"
 
     createSegment: (segment) ->
         GridPathSegment
@@ -257,7 +267,10 @@ GridWalls = React.createClass
         !(m.equals np.walls, @props.walls)
 
     key: (wall) ->
-        m.hash wall
+        x = m.get_in wall, [0, 0]
+        y = m.get_in wall, [0, 1]
+        pos = m.get wall, 1
+        "#{x}-#{y}-#{pos}"
 
     createWall: (wall) ->
         GridWall
