@@ -50,6 +50,7 @@ rg = (->
             m.vector cell, m.set (_adjacent_cells cells, cell)
         ), cells)
 
+
         ## display oriented ##
 
         # set of pairs of coordinate and wall direction: #{ [[0,0], 'south'], [[0,0], 'east'] ... [[9,9], 'north'] }
@@ -89,33 +90,22 @@ rg = (->
     cells = (grid) ->
         m.get grid, 'cells'
 
-    neighbors = (grid, coord) ->
-        # TODO : update with new data structure
+    neighbors = (grid, cell) ->
+        m.get_in grid, ['connections', cell]
 
-        # cell = m.get_in grid, ['cells', coord]
-        # walls = m.get cell, 'walls'
-        # m.reduce ((coords, position) ->
-        #     neighborCoord = m.map m.sum, coord, positionOffsets[position]
-        #     if m.has_key (m.get grid, 'cells'), neighborCoord
-        #         m.conj coords, neighborCoord
-        #     else
-        #         coords
-        # ), m.set(), walls
+    remove_wall = (grid, cell1, cell2) ->
+        cell1_direction = m.get offset_positions, m.map _diff, cell1, cell2
+        cell2_direction = m.get offset_positions, m.map _diff, cell2, cell1
 
-    remove_wall = (grid, coord1, coord2) ->
-        # TODO : update with new data structure
-
-        # diff = (a, b) -> b - a
-        # cell1Wall = m.get offsetPositions, m.map diff, coord1, coord2
-        # cell2Wall = m.get offsetPositions, m.map diff, coord2, coord1
-
-        # m.pipeline(
-        #     grid
-        #     m.curry m.update_in, ['cells', coord1, 'walls'], m.disj, cell1Wall
-        #     m.curry m.update_in, ['cells', coord2, 'walls'], m.disj, cell2Wall
-        #     m.curry m.update_in, ['walls'], m.disj, m.vector(coord1, cell1Wall)
-        #     m.curry m.update_in, ['walls'], m.disj, m.vector(coord2, cell2Wall)
-        # )
+        m.pipeline(
+            grid
+            # remove connections
+            m.curry m.update_in, ['connections', cell1], m.disj, cell2
+            m.curry m.update_in, ['connections', cell2], m.disj, cell1
+            # also update the (duplicate) wall data for the view
+            m.curry m.update_in, ['walls'], m.disj, (m.vector cell1, cell1_direction)
+            m.curry m.update_in, ['walls'], m.disj, (m.vector cell2, cell2_direction)
+        )
 
 
     create: create
@@ -124,12 +114,13 @@ rg = (->
     borders: borders
     neighbors: neighbors
     remove_wall: remove_wall
+
 )()
 
 map = (->
 
     generator = (grid) ->
-        start = m.get (rand_nth rg.cells grid), 'coord'
+        start = rand_nth m.into m.vector(), rg.cells grid
         m.hash_map(
             'grid', grid
             'stack', m.vector(start),
@@ -180,6 +171,7 @@ map = (->
     advance: advance
     complete: complete
     solve: solve
+
 )()
 
 time = (name, fn) ->
@@ -228,10 +220,12 @@ GridComponent = React.createClass
     cellWidth: 10
     padding: 10
 
-    generate: false
+    delay: 50
+
+    generate: true
 
     getDefaultProps: ->
-        width: 60
+        width: 20
         height: 20
 
     getInitialState: ->
@@ -244,7 +238,7 @@ GridComponent = React.createClass
     componentWillMount: ->
         if @generate
             @generator = map.generator @state.grid
-            @interval = setInterval @advance, 200
+            @interval = setInterval @advance, @delay
             @setState
                 grid: m.get @generator, 'grid'
                 path: m.vector()
