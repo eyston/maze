@@ -338,7 +338,7 @@ GridComponent = React.createClass
 
     getDefaultProps: ->
         width: 60
-        height: 20
+        height: 30
 
     getInitialState: ->
         time 'create grid', =>
