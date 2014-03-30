@@ -1,0 +1,6 @@
+{
+  "name": "maze",
+  "dependencies": {
+    "react": "~0.10.0"
+  }
+}
