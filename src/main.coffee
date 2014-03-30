@@ -38,6 +38,14 @@ rg = (->
     _add_borders = (borders, cells, direction) ->
         m.into borders, (m.map ((c) -> m.vector(c, direction)), cells)
 
+    _group_size = 5
+
+    _wall_group_hash = (wall) ->
+        x = m.get_in wall, [0, 0]
+        y = m.get_in wall, [0, 1]
+        m.vector(((x / _group_size) | 0), ((y / _group_size) | 0))
+
+
     create = (width, height) ->
         xs = m.range(0, width)
         ys = m.range(0, height)
@@ -76,11 +84,18 @@ rg = (->
             m.curry _add_borders, west, 'west'
         )
 
+        # maps of a hash to a group of walls
+        # this is so we can add some hiearchy to walls instead of one big list of 1000's of walls
+        wall_groups = m.reduce ((groups, wall) ->
+            m.update_in groups, [_wall_group_hash wall], (m.fnil m.conj, m.set()), wall
+        ), m.hash_map(), walls
+
         m.hash_map(
             'cells', cells
             'connections', connections
             'walls', walls
             'borders', borders
+            'wall_groups', wall_groups
         )
 
     borders = (grid) ->
@@ -92,12 +107,17 @@ rg = (->
     cells = (grid) ->
         m.get grid, 'cells'
 
+    wall_groups = (grid) ->
+        m.vals (m.get grid, 'wall_groups')
+
     neighbors = (grid, cell) ->
         m.get_in grid, ['connections', cell]
 
     remove_wall = (grid, cell1, cell2) ->
         cell1_direction = m.get offset_positions, m.map _diff, cell1, cell2
         cell2_direction = m.get offset_positions, m.map _diff, cell2, cell1
+        wall1 = (m.vector cell1, cell1_direction)
+        wall2 = (m.vector cell2, cell2_direction)
 
         m.pipeline(
             grid
@@ -105,14 +125,18 @@ rg = (->
             m.curry m.update_in, ['connections', cell1], m.disj, cell2
             m.curry m.update_in, ['connections', cell2], m.disj, cell1
             # also update the (duplicate) wall data for the view
-            m.curry m.update_in, ['walls'], m.disj, (m.vector cell1, cell1_direction)
-            m.curry m.update_in, ['walls'], m.disj, (m.vector cell2, cell2_direction)
+            m.curry m.update_in, ['walls'], m.disj, wall1
+            m.curry m.update_in, ['walls'], m.disj, wall2
+            # omg also update the wall groups (more duplication)
+            m.curry m.update_in, ['wall_groups', _wall_group_hash wall1], m.disj, wall1
+            m.curry m.update_in, ['wall_groups', _wall_group_hash wall2], m.disj, wall2
         )
 
 
     create: create
     cells: cells
     walls: walls
+    wall_groups: wall_groups
     borders: borders
     neighbors: neighbors
     remove_wall: remove_wall
@@ -244,7 +268,6 @@ GridPath = React.createClass
         !(m.equals np.segments, @props.segments)
 
     key: (segment) ->
-        # m.hash m.flatten segment
         x1 = m.get_in segment, [0, 0]
         y1 = m.get_in segment, [0, 1]
         x2 = m.get_in segment, [1, 0]
@@ -282,6 +305,24 @@ GridWalls = React.createClass
         g {className: 'walls'},
             m.into_array m.map @createWall, @props.walls
 
+GridWallGroups = React.createClass
+
+    shouldComponentUpdate: (np, ns) ->
+        !(m.equals np.wall_groups, @props.wall_groups)
+
+    key: (walls) ->
+        m.hash walls
+
+    createWalls: (walls) ->
+        GridWalls
+            key: @key walls
+            cellWidth: @props.cellWidth
+            walls: walls
+
+    render: ->
+        g {},
+            m.into_array m.map @createWalls, @props.wall_groups
+
 
 GridComponent = React.createClass
     cellWidth: 10
@@ -292,8 +333,8 @@ GridComponent = React.createClass
     generate: true
 
     getDefaultProps: ->
-        width: 20
-        height: 20
+        width: 50
+        height: 50
 
     getInitialState: ->
         time 'create grid', =>
@@ -329,9 +370,9 @@ GridComponent = React.createClass
                 GridBorder
                     cellWidth: @cellWidth
                     borders: rg.borders @state.grid
-                GridWalls
+                GridWallGroups
                     cellWidth: @cellWidth
-                    walls: rg.walls @state.grid
+                    wall_groups: rg.wall_groups @state.grid
                 GridPath
                     cellWidth: @cellWidth
                     segments: @segments()
