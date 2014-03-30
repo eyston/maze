@@ -215,6 +215,60 @@ GridPathSegment = React.createClass
             x2: x2 * @props.cellWidth + mid
             y2: y2 * @props.cellWidth + mid
 
+GridBorder = React.createClass
+
+    shouldComponentUpdate: (np, ns) ->
+        !(m.equals np.borders, @props.borders)
+
+    key: (wall) ->
+        m.hash wall
+
+    createWall: (wall) ->
+        GridWall
+            key: @key wall
+            wall: wall
+            cellWidth: @props.cellWidth
+
+    render: ->
+        g {className: 'borders'},
+            m.into_array m.map @createWall, @props.borders
+
+GridPath = React.createClass
+
+    shouldComponentUpdate: (np, ns) ->
+        !(m.equals np.segments, @props.segments)
+
+    key: (segment) ->
+        m.hash m.flatten segment
+
+    createSegment: (segment) ->
+        GridPathSegment
+            key: @key segment
+            segment: segment
+            cellWidth: @props.cellWidth
+
+    render: ->
+        g {className: 'path'},
+            m.into_array m.map @createSegment, @props.segments
+
+GridWalls = React.createClass
+
+    shouldComponentUpdate: (np, ns) ->
+        !(m.equals np.walls, @props.walls)
+
+    key: (wall) ->
+        m.hash wall
+
+    createWall: (wall) ->
+        GridWall
+            key: @key wall
+            wall: wall
+            cellWidth: @props.cellWidth
+
+    render: ->
+        g {className: 'walls'},
+            m.into_array m.map @createWall, @props.walls
+
 
 GridComponent = React.createClass
     cellWidth: 10
@@ -259,12 +313,15 @@ GridComponent = React.createClass
     render: ->
         svg { width: @cellWidth * @props.width + 2 * @padding, height: @cellWidth * @props.height + 2 * @padding },
             g {transform: "translate(#{@padding}, #{@padding})" },
-                g {className: 'walls'},
-                    m.into_array m.map ((w) => GridWall({key: (m.hash w), wall: w, cellWidth: @cellWidth})), rg.walls @state.grid
-                g {className: 'borders'},
-                    m.into_array m.map ((w) => GridWall({key: (m.hash w), wall: w, cellWidth: @cellWidth})), rg.borders @state.grid
-                g {className: 'path'},
-                    m.into_array m.map ((s) => GridPathSegment({key: (m.hash m.flatten s), segment: s, cellWidth: @cellWidth})), @segments()
+                GridBorder
+                    cellWidth: @cellWidth
+                    borders: rg.borders @state.grid
+                GridWalls
+                    cellWidth: @cellWidth
+                    walls: rg.walls @state.grid
+                GridPath
+                    cellWidth: @cellWidth
+                    segments: @segments()
 
 
 React.renderComponent GridComponent(), document.getElementById('content')
