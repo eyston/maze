@@ -4,6 +4,7 @@ m = mori
 rand_nth = (coll) ->
     m.nth coll, (Math.random() * m.count coll) | 0
 
+# Rectangular Grid
 rg = (->
 
     adjacent_offsets = m.vector(
@@ -143,6 +144,7 @@ rg = (->
 
 )()
 
+# Map Generator / Solver
 map = (->
 
     generator = (grid) ->
@@ -205,6 +207,8 @@ time = (name, fn) ->
     fn()
     end = (new Date()).getTime()
     console.log name, end - start
+
+## Views
 
 GridWall = React.createClass
 
@@ -378,4 +382,5 @@ GridComponent = React.createClass
                     segments: @segments()
 
 
+## lets do this!
 React.renderComponent GridComponent(), document.getElementById('content')
