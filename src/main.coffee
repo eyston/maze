@@ -6,91 +6,116 @@ rand_nth = (coll) ->
 
 rg = (->
 
-    create_cell = (coord) ->
-        m.hash_map(
-            'coord', coord
-            'walls', m.set ['north', 'south', 'east', 'west']
-            'borders', m.set()
-        )
+    adjacent_offsets = m.vector(
+        m.vector(0, 1)
+        m.vector(0, -1)
+        m.vector(1, 0)
+        m.vector(-1, 0)
+    )
 
-    set_border = (coords, position, cells) ->
-        m.reduce ((cells, coord) -> m.pipeline m.update_in(cells, [coord, 'borders'], m.conj, position)), cells, coords
-
-    create = (width, height) ->
-        xs = m.range(0, width)
-        ys = m.range(0, height)
-
-        grid = m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
-
-        north = m.map ((x) -> m.vector(x, 0)), xs
-        south = m.map ((x) -> m.vector(x, height - 1)), xs
-        west = m.map ((y) -> m.vector(0, y)), ys
-        east = m.map ((y) -> m.vector(width - 1, y)), ys
-
-        cells = m.pipeline(
-            m.into m.hash_map(), m.map ((coord) -> m.vector coord, create_cell(coord)), grid
-            m.partial set_border, north, 'north'
-            m.partial set_border, south, 'south'
-            m.partial set_border, east, 'east'
-            m.partial set_border, west, 'west'
-        )
-
-        m.hash_map(
-            'cells', cells
-            'height', height
-            'width', width
-        )
-
-    edges = (grid, type) ->
-        m.mapcat ((cell) ->
-                coord = m.get cell, 0
-                es = m.get_in cell, [1, type]
-                m.map ((position) -> m.vector(coord, position)), es
-            ), grid
-
-    borders = (grid) ->
-        edges m.get(grid, 'cells'), 'borders'
-
-    walls = (grid) ->
-        edges m.get(grid, 'cells'), 'walls'
-
-    cells = (grid) ->
-        m.vals m.get grid, 'cells'
-
-    positionOffsets =
-        'north': [0, -1]
-        'south': [0, 1]
-        'east': [1, 0]
-        'west': [-1, 0]
-
-    offsetPositions = m.hash_map(
+    offset_positions = m.hash_map(
         m.vector(0, -1), 'north'
         m.vector(0, 1), 'south'
         m.vector(1, 0), 'east'
         m.vector(-1, 0), 'west'
     )
 
+    position_offsets = m.hash_map(
+        'north', m.vector(0, -1)
+        'south', m.vector(0, 1)
+        'east', m.vector(1, 0)
+        'west', m.vector(-1, 0)
+    )
+
+    _diff = (a, b) -> b - a
+
+    _adjacent_cells = (cells, cell) ->
+        possible_cells = m.set m.map (m.partial m.map, m.sum, cell), adjacent_offsets
+        m.intersection possible_cells, cells
+
+    _add_borders = (borders, cells, direction) ->
+        m.into borders, (m.map ((c) -> m.vector(c, direction)), cells)
+
+    create = (width, height) ->
+        xs = m.range(0, width)
+        ys = m.range(0, height)
+
+        ## the real stuff ##
+
+        # set of coordinates: #{ [0, 0], [0, 1], ..., [9, 9] }
+        cells = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
+
+        # connections from cell to cells: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
+        connections = m.into m.hash_map(), (m.map ((cell) ->
+            m.vector cell, m.set (_adjacent_cells cells, cell)
+        ), cells)
+
+        ## display oriented ##
+
+        # set of pairs of coordinate and wall direction: #{ [[0,0], 'south'], [[0,0], 'east'] ... [[9,9], 'north'] }
+        walls = m.reduce_kv ((ws, cell, neighbors) ->
+            m.into ws, (m.map ((n) ->
+                m.vector cell, (m.get offset_positions, m.map _diff, cell, n)
+            ), neighbors)
+        ), m.set(), connections
+
+
+        north = m.map ((x) -> m.vector(x, 0)), xs
+        south = m.map ((x) -> m.vector(x, height - 1)), xs
+        west = m.map ((y) -> m.vector(0, y)), ys
+        east = m.map ((y) -> m.vector(width - 1, y)), ys
+
+        # set of pairs of coordinate and border direction: #{ [[0,0], 'north'], [[0,0], 'west'] ... [[9,9], 'south'] }
+        borders = m.pipeline(m.set(),
+            m.curry _add_borders, north, 'north'
+            m.curry _add_borders, south, 'south'
+            m.curry _add_borders, east, 'east'
+            m.curry _add_borders, west, 'west'
+        )
+
+        m.hash_map(
+            'cells', cells
+            'connections', connections
+            'walls', walls
+            'borders', borders
+        )
+
+    borders = (grid) ->
+        m.get grid, 'borders'
+
+    walls = (grid) ->
+        m.get grid, 'walls'
+
+    cells = (grid) ->
+        m.get grid, 'cells'
+
     neighbors = (grid, coord) ->
-        cell = m.get_in grid, ['cells', coord]
-        walls = m.get cell, 'walls'
-        m.reduce ((coords, position) ->
-            neighborCoord = m.map m.sum, coord, positionOffsets[position]
-            if m.has_key (m.get grid, 'cells'), neighborCoord
-                m.conj coords, neighborCoord
-            else
-                coords
-        ), m.set(), walls
+        # TODO : update with new data structure
+
+        # cell = m.get_in grid, ['cells', coord]
+        # walls = m.get cell, 'walls'
+        # m.reduce ((coords, position) ->
+        #     neighborCoord = m.map m.sum, coord, positionOffsets[position]
+        #     if m.has_key (m.get grid, 'cells'), neighborCoord
+        #         m.conj coords, neighborCoord
+        #     else
+        #         coords
+        # ), m.set(), walls
 
     remove_wall = (grid, coord1, coord2) ->
-        diff = (a, b) -> b - a
-        cell1Wall = m.get offsetPositions, m.map diff, coord1, coord2
-        cell2Wall = m.get offsetPositions, m.map diff, coord2, coord1
+        # TODO : update with new data structure
 
-        m.pipeline(
-            grid
-            m.curry m.update_in, ['cells', coord1, 'walls'], m.disj, cell1Wall
-            m.curry m.update_in, ['cells', coord2, 'walls'], m.disj, cell2Wall
-        )
+        # diff = (a, b) -> b - a
+        # cell1Wall = m.get offsetPositions, m.map diff, coord1, coord2
+        # cell2Wall = m.get offsetPositions, m.map diff, coord2, coord1
+
+        # m.pipeline(
+        #     grid
+        #     m.curry m.update_in, ['cells', coord1, 'walls'], m.disj, cell1Wall
+        #     m.curry m.update_in, ['cells', coord2, 'walls'], m.disj, cell2Wall
+        #     m.curry m.update_in, ['walls'], m.disj, m.vector(coord1, cell1Wall)
+        #     m.curry m.update_in, ['walls'], m.disj, m.vector(coord2, cell2Wall)
+        # )
 
 
     create: create
@@ -203,20 +228,26 @@ GridComponent = React.createClass
     cellWidth: 10
     padding: 10
 
+    generate: false
+
     getDefaultProps: ->
-        width: 20
+        width: 60
         height: 20
 
     getInitialState: ->
-        grid: rg.create(@props.width, @props.height)
+        time 'create grid', =>
+            @grid = rg.create(@props.width, @props.height)
+
+        grid: @grid
         path: m.vector()
 
     componentWillMount: ->
-        @generator = map.generator @state.grid
-        @interval = setInterval @advance, 50
-        @setState
-            grid: m.get @generator, 'grid'
-            path: m.vector()
+        if @generate
+            @generator = map.generator @state.grid
+            @interval = setInterval @advance, 200
+            @setState
+                grid: m.get @generator, 'grid'
+                path: m.vector()
 
     advance: ->
         time 'advance', () =>
