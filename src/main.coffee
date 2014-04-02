@@ -4,8 +4,46 @@ m = mori
 rand_nth = (coll) ->
     m.nth coll, (Math.random() * m.count coll) | 0
 
-# Rectangular Grid
-rg = (->
+# Graph suff for adjacent 2 dimensional thingie
+Graph = (->
+
+    rectangular = (width, height) ->
+        xs = m.range(0, width)
+        ys = m.range(0, height)
+
+        # set of coordinates: #{ [0, 0], [0, 1], ..., [9, 9] }
+        nodes = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
+
+        # edges from node to node: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
+        all_edges = m.reduce ((all_edges, node) ->
+            possible_neighbors = (_possible_neighbors nodes, node)
+            neighbors = m.intersection possible_neighbors, nodes
+            missing_neighbors = m.difference possible_neighbors, neighbors
+            m.pipeline(
+                all_edges
+                m.curry m.update_in, [0], m.assoc, node, neighbors
+                m.curry m.update_in, [1], m.assoc, node, missing_neighbors
+            )
+        ), (m.vector m.hash_map(), m.hash_map()), nodes
+
+        m.hash_map(
+            'edges', (m.get all_edges, 0)
+            'missing_edges', (m.get all_edges, 1)
+            'nodes', nodes
+        )
+
+    nodes = (graph) ->
+        m.get graph, 'nodes'
+
+    edges = (graph) ->
+        m.get graph, 'edges'
+
+    neighbors = (graph, node) ->
+        m.get_in graph, ['edges', node]
+
+    missing_neighbors = (graph, node) ->
+        m.get_in graph, ['missing_edges', node]
+
 
     adjacent_offsets = m.vector(
         m.vector(0, 1)
@@ -13,6 +51,25 @@ rg = (->
         m.vector(1, 0)
         m.vector(-1, 0)
     )
+
+    _possible_neighbors = (nodes, node) ->
+        m.set m.map ((offset) ->
+            m.into m.vector(), (m.map m.sum, node, offset)
+        ), adjacent_offsets
+
+    _adjacent_nodes = (nodes, node) ->
+        m.intersection (_possible_neighbors nodes, node), nodes
+
+    rectangular: rectangular
+    edges: edges
+    nodes: nodes
+    neighbors: neighbors
+    missing_neighbors: missing_neighbors
+
+)()
+
+# Rectangular Grid
+rg = (->
 
     offset_positions = m.hash_map(
         m.vector(0, -1), 'north'
@@ -30,12 +87,6 @@ rg = (->
 
     _diff = (a, b) -> b - a
 
-    _adjacent_cells = (cells, cell) ->
-        possible_cells = m.set m.map ((offset) ->
-            m.into m.vector(), (m.map m.sum, cell, offset)
-        ), adjacent_offsets
-        m.intersection possible_cells, cells
-
     _add_borders = (borders, cells, direction) ->
         m.into borders, (m.map ((c) -> m.vector(c, direction)), cells)
 
@@ -48,19 +99,8 @@ rg = (->
 
 
     create = (width, height) ->
-        xs = m.range(0, width)
-        ys = m.range(0, height)
 
-        ## the real stuff ##
-
-        # set of coordinates: #{ [0, 0], [0, 1], ..., [9, 9] }
-        cells = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
-
-        # connections from cell to cells: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
-        connections = m.into m.hash_map(), (m.map ((cell) ->
-            m.vector cell, m.set (_adjacent_cells cells, cell)
-        ), cells)
-
+        graph = Graph.rectangular width, height
 
         ## display oriented ##
 
@@ -69,21 +109,13 @@ rg = (->
             m.into ws, (m.map ((n) ->
                 m.vector cell, (m.get offset_positions, m.map _diff, cell, n)
             ), neighbors)
-        ), m.set(), connections
+        ), m.set(), Graph.edges graph
 
-
-        north = m.map ((x) -> m.vector(x, 0)), xs
-        south = m.map ((x) -> m.vector(x, height - 1)), xs
-        west = m.map ((y) -> m.vector(0, y)), ys
-        east = m.map ((y) -> m.vector(width - 1, y)), ys
-
-        # set of pairs of coordinate and border direction: #{ [[0,0], 'north'], [[0,0], 'west'] ... [[9,9], 'south'] }
-        borders = m.pipeline(m.set(),
-            m.curry _add_borders, north, 'north'
-            m.curry _add_borders, south, 'south'
-            m.curry _add_borders, east, 'east'
-            m.curry _add_borders, west, 'west'
-        )
+        borders = m.reduce ((borders, node) ->
+            m.into borders, m.map ((neighbor) ->
+                m.vector node, (m.get offset_positions, m.map _diff, node, neighbor)
+            ), (Graph.missing_neighbors graph, node)
+        ), m.set(), Graph.nodes graph
 
         # maps of a hash to a group of walls
         # this is so we can add some hiearchy to walls instead of one big list of 1000's of walls
@@ -92,8 +124,7 @@ rg = (->
         ), m.hash_map(), walls
 
         m.hash_map(
-            'cells', cells
-            'connections', connections
+            'graph', graph
             'walls', walls
             'borders', borders
             'wall_groups', wall_groups
@@ -106,13 +137,13 @@ rg = (->
         m.get grid, 'walls'
 
     cells = (grid) ->
-        m.get grid, 'cells'
+        Graph.nodes (m.get grid, 'graph')
 
     wall_groups = (grid) ->
         m.vals (m.get grid, 'wall_groups')
 
     neighbors = (grid, cell) ->
-        m.get_in grid, ['connections', cell]
+        Graph.neighbors (m.get grid, 'graph'), cell
 
     remove_wall = (grid, cell1, cell2) ->
         cell1_direction = m.get offset_positions, m.map _diff, cell1, cell2
