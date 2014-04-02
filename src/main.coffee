@@ -15,22 +15,36 @@ Graph = (->
         nodes = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
 
         # edges from node to node: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
-        all_edges = m.reduce ((all_edges, node) ->
-            possible_neighbors = (_possible_neighbors nodes, node)
-            neighbors = m.intersection possible_neighbors, nodes
-            missing_neighbors = m.difference possible_neighbors, neighbors
-            m.pipeline(
-                all_edges
-                m.curry m.update_in, [0], m.assoc, node, neighbors
-                m.curry m.update_in, [1], m.assoc, node, missing_neighbors
-            )
-        ), (m.vector m.hash_map(), m.hash_map()), nodes
+        all_edges = _all_edges nodes
 
         m.hash_map(
             'edges', (m.get all_edges, 0)
             'missing_edges', (m.get all_edges, 1)
             'nodes', nodes
         )
+
+    circular = (radius) ->
+        xs = m.range(0, radius*4)
+        ys = m.range(0, radius*4)
+
+        nodes = m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
+
+        nodes = m.set m.filter ((n) ->
+            x = m.get n, 0
+            y = m.get n, 1
+
+            (Math.sqrt(Math.pow(radius - x, 2) + Math.pow(radius - y, 2)) < radius)
+        ), nodes
+
+        # edges from node to node: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
+        all_edges = _all_edges nodes
+
+        m.hash_map(
+            'edges', (m.get all_edges, 0)
+            'missing_edges', (m.get all_edges, 1)
+            'nodes', nodes
+        )
+
 
     nodes = (graph) ->
         m.get graph, 'nodes'
@@ -52,6 +66,18 @@ Graph = (->
         m.vector(-1, 0)
     )
 
+    _all_edges = (nodes) ->
+        m.reduce ((all_edges, node) ->
+            possible_neighbors = (_possible_neighbors nodes, node)
+            neighbors = m.intersection possible_neighbors, nodes
+            missing_neighbors = m.difference possible_neighbors, neighbors
+            m.pipeline(
+                all_edges
+                m.curry m.update_in, [0], m.assoc, node, neighbors
+                m.curry m.update_in, [1], m.assoc, node, missing_neighbors
+            )
+        ), (m.vector m.hash_map(), m.hash_map()), nodes
+
     _possible_neighbors = (nodes, node) ->
         m.set m.map ((offset) ->
             m.into m.vector(), (m.map m.sum, node, offset)
@@ -61,6 +87,7 @@ Graph = (->
         m.intersection (_possible_neighbors nodes, node), nodes
 
     rectangular: rectangular
+    circular: circular
     edges: edges
     nodes: nodes
     neighbors: neighbors
@@ -98,12 +125,7 @@ rg = (->
         m.vector(((x / _group_size) | 0), ((y / _group_size) | 0))
 
 
-    create = (width, height) ->
-
-        graph = Graph.rectangular width, height
-
-        ## display oriented ##
-
+    create = (graph) ->
         # set of pairs of coordinate and wall direction: #{ [[0,0], 'south'], [[0,0], 'east'] ... [[9,9], 'north'] }
         walls = m.reduce_kv ((ws, cell, neighbors) ->
             m.into ws, (m.map ((n) ->
@@ -129,6 +151,12 @@ rg = (->
             'borders', borders
             'wall_groups', wall_groups
         )
+
+    rectangular = (width, height) ->
+        create Graph.rectangular width, height
+
+    circle = (radius) ->
+        create Graph.circular radius
 
     borders = (grid) ->
         m.get grid, 'borders'
@@ -165,7 +193,8 @@ rg = (->
         )
 
 
-    create: create
+    rectangular: rectangular
+    circle: circle
     cells: cells
     walls: walls
     wall_groups: wall_groups
@@ -373,7 +402,7 @@ GridComponent = React.createClass
 
     getInitialState: ->
         time 'create grid', =>
-            @grid = rg.create(@props.width, @props.height)
+            @grid = rg.rectangular(@props.width, @props.height)
 
         grid: @grid
         path: m.vector()
