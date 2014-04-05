@@ -11,17 +11,10 @@ Graph = (->
         xs = m.range(0, width)
         ys = m.range(0, height)
 
-        # set of coordinates: #{ [0, 0], [0, 1], ..., [9, 9] }
         nodes = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
 
-        # edges from node to node: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
-        all_edges = _all_edges nodes
+        build_graph nodes
 
-        m.hash_map(
-            'edges', (m.get all_edges, 0)
-            'missing_edges', (m.get all_edges, 1)
-            'nodes', nodes
-        )
 
     circular = (radius) ->
         xs = m.range(0, radius*4)
@@ -36,15 +29,14 @@ Graph = (->
             (Math.sqrt(Math.pow(radius - x, 2) + Math.pow(radius - y, 2)) < radius)
         ), nodes
 
-        # edges from node to node: { [0, 0] #{[0, 1], [1, 0]}, ..., [9, 9] #{[9, 8], [8, 9]} }
-        all_edges = _all_edges nodes
+        build_graph nodes
 
+    build_graph = (nodes) ->
         m.hash_map(
-            'edges', (m.get all_edges, 0)
-            'missing_edges', (m.get all_edges, 1)
+            'edges', _find_edges nodes
+            'missing_edges', _find_missing_edges nodes
             'nodes', nodes
         )
-
 
     nodes = (graph) ->
         m.get graph, 'nodes'
@@ -52,12 +44,8 @@ Graph = (->
     edges = (graph) ->
         m.get graph, 'edges'
 
-    neighbors = (graph, node) ->
-        m.get_in graph, ['edges', node]
-
-    missing_neighbors = (graph, node) ->
-        m.get_in graph, ['missing_edges', node]
-
+    missing_edges = (graph) ->
+        m.get graph, 'missing_edges'
 
     adjacent_offsets = m.vector(
         m.vector(0, 1)
@@ -66,78 +54,61 @@ Graph = (->
         m.vector(-1, 0)
     )
 
-    _all_edges = (nodes) ->
-        m.reduce ((all_edges, node) ->
-            possible_neighbors = (_possible_neighbors nodes, node)
-            neighbors = m.intersection possible_neighbors, nodes
-            missing_neighbors = m.difference possible_neighbors, neighbors
-            m.pipeline(
-                all_edges
-                m.curry m.update_in, [0], m.assoc, node, neighbors
-                m.curry m.update_in, [1], m.assoc, node, missing_neighbors
-            )
-        ), (m.vector m.hash_map(), m.hash_map()), nodes
-
-    _possible_neighbors = (nodes, node) ->
+    _possible_edges = (node) ->
         m.set m.map ((offset) ->
             m.into m.vector(), (m.map m.sum, node, offset)
         ), adjacent_offsets
 
-    _adjacent_nodes = (nodes, node) ->
-        m.intersection (_possible_neighbors nodes, node), nodes
+    _find_edges = (nodes) ->
+        m.into m.hash_map(), m.map ((node) ->
+            node_edges = m.intersection (_possible_edges node), nodes
+            m.vector(node, node_edges)
+        ), nodes
+
+    _find_missing_edges = (nodes) ->
+        m.into m.hash_map(), m.map ((node) ->
+            node_missing_edges = m.difference (_possible_edges node), nodes
+            m.vector(node, node_missing_edges)
+        ), nodes
 
     rectangular: rectangular
     circular: circular
+
+    # protocal / interface
     edges: edges
+    missing_edges: missing_edges
     nodes: nodes
-    neighbors: neighbors
-    missing_neighbors: missing_neighbors
 
 )()
 
-# Rectangular Grid
+
 rg = (->
-
-    offset_positions = m.hash_map(
-        m.vector(0, -1), 'north'
-        m.vector(0, 1), 'south'
-        m.vector(1, 0), 'east'
-        m.vector(-1, 0), 'west'
-    )
-
-    position_offsets = m.hash_map(
-        'north', m.vector(0, -1)
-        'south', m.vector(0, 1)
-        'east', m.vector(1, 0)
-        'west', m.vector(-1, 0)
-    )
-
-    _diff = (a, b) -> b - a
-
-    _add_borders = (borders, cells, direction) ->
-        m.into borders, (m.map ((c) -> m.vector(c, direction)), cells)
 
     _group_size = 5
 
     _wall_group_hash = (wall) ->
-        x = m.get_in wall, [0, 0]
-        y = m.get_in wall, [0, 1]
+        w = m.into m.vector(), wall
+        x = m.get_in w, [0, 0]
+        y = m.get_in w, [0, 1]
         m.vector(((x / _group_size) | 0), ((y / _group_size) | 0))
 
-
     create = (graph) ->
-        # set of pairs of coordinate and wall direction: #{ [[0,0], 'south'], [[0,0], 'east'] ... [[9,9], 'north'] }
+
         walls = m.reduce_kv ((ws, cell, neighbors) ->
-            m.into ws, (m.map ((n) ->
-                m.vector cell, (m.get offset_positions, m.map _diff, cell, n)
-            ), neighbors)
+            m.pipeline(
+                neighbors
+                m.partial m.map, m.partial(m.sorted_set, cell)
+                m.partial m.into, ws
+            )
         ), m.set(), Graph.edges graph
 
-        borders = m.reduce ((borders, node) ->
-            m.into borders, m.map ((neighbor) ->
-                m.vector node, (m.get offset_positions, m.map _diff, node, neighbor)
-            ), (Graph.missing_neighbors graph, node)
-        ), m.set(), Graph.nodes graph
+        borders = m.reduce_kv ((bs, cell, neighbors) ->
+            m.pipeline(
+                neighbors
+                m.partial m.map, m.partial(m.sorted_set, cell)
+                m.partial m.into, bs
+            )
+        ), m.set(), Graph.missing_edges graph
 
         # maps of a hash to a group of walls
         # this is so we can add some hiearchy to walls instead of one big list of 1000's of walls
@@ -170,31 +141,23 @@ rg = (->
     wall_groups = (grid) ->
         m.vals (m.get grid, 'wall_groups')
 
-    neighbors = (grid, cell) ->
-        Graph.neighbors (m.get grid, 'graph'), cell
+    neighbors = (grid, node) ->
+        edges = Graph.edges (m.get grid, 'graph')
+        m.get edges, node
 
     remove_wall = (grid, cell1, cell2) ->
-        cell1_direction = m.get offset_positions, m.map _diff, cell1, cell2
-        cell2_direction = m.get offset_positions, m.map _diff, cell2, cell1
-        wall1 = (m.vector cell1, cell1_direction)
-        wall2 = (m.vector cell2, cell2_direction)
+        wall = m.sorted_set cell1, cell2
 
         m.pipeline(
             grid
-            # remove connections
-            m.curry m.update_in, ['connections', cell1], m.disj, cell2
-            m.curry m.update_in, ['connections', cell2], m.disj, cell1
-            # also update the (duplicate) wall data for the view
-            m.curry m.update_in, ['walls'], m.disj, wall1
-            m.curry m.update_in, ['walls'], m.disj, wall2
-            # omg also update the wall groups (more duplication)
-            m.curry m.update_in, ['wall_groups', _wall_group_hash wall1], m.disj, wall1
-            m.curry m.update_in, ['wall_groups', _wall_group_hash wall2], m.disj, wall2
+            m.curry m.update_in, ['walls'], m.disj, wall
+            m.curry m.update_in, ['wall_groups', _wall_group_hash wall], m.disj, wall
         )
 
 
     rectangular: rectangular
     circle: circle
+
     cells: cells
     walls: walls
     wall_groups: wall_groups
@@ -270,27 +233,6 @@ time = (name, fn) ->
 
 ## Views
 
-GridWall = React.createClass
-
-    wallOffsets:
-        north: [0, 0, 1, 0]
-        south: [0, 1, 1, 1]
-        east: [1, 0, 1, 1]
-        west: [0, 0, 0, 1]
-
-    shouldComponentUpdate: (np, ns) ->
-        !(m.equals np.wall, @props.wall)
-
-    render: ->
-        [[x, y], direction] = m.clj_to_js(@props.wall)
-        [x1, y1, x2, y2] = @wallOffsets[direction]
-        line
-            x1: (x + x1) * @props.cellWidth
-            y1: (y + y1) * @props.cellWidth
-            x2: (x + x2) * @props.cellWidth
-            y2: (y + y2) * @props.cellWidth
-
-
 GridPathSegment = React.createClass
 
     shouldComponentUpdate: (np, ns) ->
@@ -304,27 +246,6 @@ GridPathSegment = React.createClass
             y1: y1 * @props.cellWidth + mid
             x2: x2 * @props.cellWidth + mid
             y2: y2 * @props.cellWidth + mid
-
-GridBorder = React.createClass
-
-    shouldComponentUpdate: (np, ns) ->
-        !(m.equals np.borders, @props.borders)
-
-    key: (wall) ->
-        x = m.get_in wall, [0, 0]
-        y = m.get_in wall, [0, 1]
-        pos = m.get wall, 1
-        "#{x}-#{y}-#{pos}"
-
-    createWall: (wall) ->
-        GridWall
-            key: @key wall
-            wall: wall
-            cellWidth: @props.cellWidth
-
-    render: ->
-        g {className: 'borders'},
-            m.into_array m.map @createWall, @props.borders
 
 GridPath = React.createClass
 
@@ -348,39 +269,72 @@ GridPath = React.createClass
         g {className: 'path'},
             m.into_array m.map @createSegment, @props.segments
 
+GridWall = React.createClass
+
+    offsets: m.hash_map(
+        m.vector(0, -1), [0, 0, 1, 0]
+        m.vector(0, 1), [0, 1, 1, 1]
+        m.vector(1, 0), [1, 0, 1, 1]
+        m.vector(-1, 0), [0, 0, 0, 1]
+    )
+
+    statics:
+        key: (wall) ->
+            w = m.into m.vector(), wall
+            x1 = m.get_in w, [0, 0]
+            y1 = m.get_in w, [0, 1]
+            x2 = m.get_in w, [1, 0]
+            y2 = m.get_in w, [1, 1]
+            "#{x1}-#{y1}-#{x2}-#{y2}"
+
+    shouldComponentUpdate: (np, ns) ->
+        !(m.equals np.wall, @props.wall)
+
+    render: ->
+        wall = m.into m.vector(), @props.wall
+
+        cell1 = m.get wall, 0
+        cell2 = m.get wall, 1
+
+        [x, y] = m.into_array cell1
+        [x1, y1, x2, y2] = m.get @offsets, (m.map ((a, b) -> a - b), cell2, cell1)
+
+        line
+            x1: (x + x1) * @props.cellWidth
+            y1: (y + y1) * @props.cellWidth
+            x2: (x + x2) * @props.cellWidth
+            y2: (y + y2) * @props.cellWidth
+
 GridWalls = React.createClass
 
     shouldComponentUpdate: (np, ns) ->
         !(m.equals np.walls, @props.walls)
 
-    key: (wall) ->
-        x = m.get_in wall, [0, 0]
-        y = m.get_in wall, [0, 1]
-        pos = m.get wall, 1
-        "#{x}-#{y}-#{pos}"
+    statics:
+        key: (walls) ->
+            m.hash walls
 
     createWall: (wall) ->
         GridWall
-            key: @key wall
+            key: GridWall.key wall
             wall: wall
             cellWidth: @props.cellWidth
 
     render: ->
-        g {className: 'walls'},
+        g {className: @props.type},
             m.into_array m.map @createWall, @props.walls
+
 
 GridWallGroups = React.createClass
 
     shouldComponentUpdate: (np, ns) ->
         !(m.equals np.wall_groups, @props.wall_groups)
 
-    key: (walls) ->
-        m.hash walls
-
     createWalls: (walls) ->
         GridWalls
-            key: @key walls
+            key: GridWalls.key walls
             cellWidth: @props.cellWidth
+            type: @props.type
             walls: walls
 
     render: ->
@@ -389,7 +343,7 @@ GridWallGroups = React.createClass
 
 
 GridComponent = React.createClass
-    cellWidth: 10
+    cellWidth: 50
     padding: 10
 
     delay: 50
@@ -397,8 +351,8 @@ GridComponent = React.createClass
     generate: true
 
     getDefaultProps: ->
-        width: 60
-        height: 30
+        width: 10
+        height: 10
 
     getInitialState: ->
         time 'create grid', =>
@@ -431,12 +385,14 @@ GridComponent = React.createClass
     render: ->
         svg { width: @cellWidth * @props.width + 2 * @padding, height: @cellWidth * @props.height + 2 * @padding },
             g {transform: "translate(#{@padding}, #{@padding})" },
-                GridBorder
-                    cellWidth: @cellWidth
-                    borders: rg.borders @state.grid
                 GridWallGroups
                     cellWidth: @cellWidth
+                    type: 'walls'
                     wall_groups: rg.wall_groups @state.grid
+                GridWalls
+                    cellWidth: @cellWidth
+                    type: 'borders'
+                    walls: rg.borders @state.grid
                 GridPath
                     cellWidth: @cellWidth
                     segments: @segments()
