@@ -54,10 +54,19 @@ gulp.task('build', ['index'], function (callback) {
 });
 
 gulp.task('watch', function () {
-    gulp.watch('src/**/*', ['build']);
+
+    var watchConfig = Object.create(config);
+    watchConfig.watch = true;
+
+    webpack(watchConfig, function (err, stats) {
+        if (err) throw new gutil.PluginError('webpack', err);
+        gutil.log('[webpack]', stats.toString({
+            colors: true
+        }));
+    });
 });
 
-gulp.task('server', ['index'], function (callback) {
+gulp.task('server', ['index'], function () {
 
     new WebpackDevServer(webpack(config), {
         contentBase: path.join(__dirname, 'public'),
