@@ -1,86 +1,15 @@
-{svg, g, line} = React.DOM
-m = mori
+require './main.less'
+
+React = require 'react'
+{ svg, g, line} = React.DOM
+
+m = require 'mori'
 
 rand_nth = (coll) ->
     m.nth coll, (Math.random() * m.count coll) | 0
 
 # Graph suff for adjacent 2 dimensional thingie
-Graph = (->
-
-    rectangular = (width, height) ->
-        xs = m.range(0, width)
-        ys = m.range(0, height)
-
-        nodes = m.set m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
-
-        build_graph nodes
-
-
-    circular = (radius) ->
-        xs = m.range(0, radius*4)
-        ys = m.range(0, radius*4)
-
-        nodes = m.mapcat ((x) -> m.map ((y) -> m.vector(x,y)), ys), xs
-
-        nodes = m.set m.filter ((n) ->
-            x = m.get n, 0
-            y = m.get n, 1
-
-            (Math.sqrt(Math.pow(radius - x, 2) + Math.pow(radius - y, 2)) < radius)
-        ), nodes
-
-        build_graph nodes
-
-    build_graph = (nodes) ->
-        m.hash_map(
-            'edges', _find_edges nodes
-            'missing_edges', _find_missing_edges nodes
-            'nodes', nodes
-        )
-
-    nodes = (graph) ->
-        m.get graph, 'nodes'
-
-    edges = (graph) ->
-        m.get graph, 'edges'
-
-    missing_edges = (graph) ->
-        m.get graph, 'missing_edges'
-
-    adjacent_offsets = m.vector(
-        m.vector(0, 1)
-        m.vector(0, -1)
-        m.vector(1, 0)
-        m.vector(-1, 0)
-    )
-
-    _possible_edges = (node) ->
-        m.set m.map ((offset) ->
-            m.into m.vector(), (m.map m.sum, node, offset)
-        ), adjacent_offsets
-
-    _find_edges = (nodes) ->
-        m.into m.hash_map(), m.map ((node) ->
-            node_edges = m.intersection (_possible_edges node), nodes
-            m.vector(node, node_edges)
-        ), nodes
-
-    _find_missing_edges = (nodes) ->
-        m.into m.hash_map(), m.map ((node) ->
-            node_missing_edges = m.difference (_possible_edges node), nodes
-            m.vector(node, node_missing_edges)
-        ), nodes
-
-    rectangular: rectangular
-    circular: circular
-
-    # protocal / interface
-    edges: edges
-    missing_edges: missing_edges
-    nodes: nodes
-
-)()
-
+Graph = require('./graph.coffee');
 
 rg = (->
 
